@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bucket</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<header>
+  <h1>bucket</h1>
+  <p id="subtitle">loading…</p>
+</header>
+
+<nav id="tabs">
+  <button data-tab="browse" class="on">memory</button>
+  <button data-tab="people">people</button>
+  <button data-tab="search">recall</button>
+  <button data-tab="chat">talk</button>
+</nav>
+
+<main>
+  <section id="browse" class="tab on">
+    <input id="fact-filter" type="search" placeholder="filter what it knows…" autocomplete="off">
+    <div id="stats" class="grid"></div>
+    <div id="obsession"></div>
+    <div id="facts" class="list"></div>
+  </section>
+
+  <section id="people" class="tab">
+    <div id="people-list" class="list"></div>
+    <div id="person"></div>
+  </section>
+
+  <section id="search" class="tab">
+    <input id="recall-input" type="search" placeholder="say something and see what it digs up…" autocomplete="off">
+    <p class="hint">semantic recall finds meaning; lexical finds shared words. this is what the brain sees before it picks a reply.</p>
+    <div id="recall-out"></div>
+  </section>
+
+  <section id="chat" class="tab">
+    <div id="log"></div>
+    <label class="learn">
+      <input type="checkbox" id="learn-toggle">
+      let it learn from this
+    </label>
+    <form id="chat-form" autocomplete="off">
+      <input id="chat-input" placeholder="say something to bucket…" autocomplete="off">
+      <button type="submit">send</button>
+    </form>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>
