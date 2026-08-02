@@ -585,15 +585,14 @@ class Learner:
 
     # ------------------------------------------------------------------
     def _learn_item(self, text: str, author: str) -> str | None:
-        """Apply a directional inventory event, if the line contains one."""
-        event = parse_inventory_event(text)
-        if event is None:
-            return None
+        """Apply only human receive events during message ingestion.
 
-        if event.action == INVENTORY_RECEIVE:
-            return self.db.add_item(event.item, author, config.INVENTORY_SIZE)
-        if event.action == INVENTORY_DROP:
-            return event.item if self.db.remove_item(event.item) else None
-        if event.action == INVENTORY_ACTIVATE:
-            return event.item if self.db.activate_item(event.item) else None
-        return None
+        Discard and activate actions are applied from Bucket's own generated
+        speech or inventory callbacks. Applying those actions to human input
+        lets a prompt such as ``bucket give me the knife`` mutate state before
+        Bucket has decided what to say.
+        """
+        event = parse_inventory_event(text)
+        if event is None or event.action != INVENTORY_RECEIVE:
+            return None
+        return self.db.add_item(event.item, author, config.INVENTORY_SIZE)

@@ -48,27 +48,28 @@ def main() -> int:
         if not ok:
             failures.append(f"parser: {text!r}: expected {expected!r}, got {got!r}")
 
-    print("\n=== human state transitions ===")
+    print("\n=== human receive events ===")
     bot.learner.ingest("alice gives bucket a rusty hammer", author="alice", chat="t")
     bot.learner.ingest("bucket picks up the knife", author="alice", chat="t")
     if not {"rusty hammer", "knife"}.issubset(bot.db.items()):
         failures.append("receive/pick-up did not add both items")
     print(f"  after receiving: {bot.db.items()}")
 
+    before = bot.db.items()
     bot.learner.ingest("bucket holds the knife", author="alice", chat="t")
     active = bot.db.conn.execute(
         "SELECT active FROM inventory WHERE lower(item) = 'knife'"
     ).fetchone()
-    if active is None or not active["active"]:
-        failures.append("hold did not mark the knife active")
-    print(f"  active knife: {bool(active and active['active'])}")
+    if active is None or active["active"] or bot.db.items() != before:
+        failures.append("human hold mutated inventory state")
+    print(f"  human hold leaves inventory unchanged: {active is not None and not active['active']}")
 
     bot.learner.ingest("bucket gives alice the rusty hammer", author="alice", chat="t")
-    if "rusty hammer" in bot.db.items():
-        failures.append("give did not remove the rusty hammer")
-    print(f"  after giving it away: {bot.db.items()}")
+    bot.learner.ingest("bucket give me the knife", author="alice", chat="t")
+    if not {"rusty hammer", "knife"}.issubset(bot.db.items()):
+        failures.append("human give command removed an inventory item")
+    print(f"  human give commands leave inventory unchanged: {bot.db.items() == before}")
 
-    before = bot.db.items()
     bot.learner.ingest("bucket drops a nonexistent sword", author="alice", chat="t")
     if bot.db.items() != before or bot.db.remove_item("nonexistent sword"):
         failures.append("failed drop changed inventory")
