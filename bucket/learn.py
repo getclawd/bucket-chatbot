@@ -418,13 +418,13 @@ class Learner:
         if not reinforce:
             return uid
 
-        # A line naming someone from the 2008 transcripts is stored (so /recall
-        # and /literal can still show it) but never learned from. Letting it into
-        # the chain or the phrase table is what puts the name in Bucket's mouth
-        # later, recombined and stripped of any context. Checked on the text
-        # rather than the author because these names arrive through present-day
-        # speakers too — a real user asking "who is cypress_z" is how that one
-        # got into the live chain in the first place.
+        # A line naming someone blocked is stored (so /recall and /literal can
+        # still show it) but never learned from. Letting it into the chain or the
+        # phrase table is what puts the name in Bucket's mouth later, recombined
+        # and stripped of any context. Checked on the text rather than the author
+        # because these names arrive through present-day speakers too — a real
+        # user asking "who is oldname_7" is how one got into the live chain in
+        # the first place.
         if BLOCKED.blocks(text):
             return uid
 

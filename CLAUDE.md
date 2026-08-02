@@ -121,20 +121,26 @@ Enforced at **three** points, and all three are load-bearing:
   verbatim, so they redact; the queried subject is redacted too, or the command
   echoes the name straight back
 
-The reply guard is not redundant with the learning guard. `cypress_z` reached the
-live chain because Bucket said it and a **real present-day user asked "who is
-cypress_z"** — the name laundered itself through a legitimate, reinforcing
+The reply guard is not redundant with the learning guard. A name reaches the live
+chain because Bucket said it and a **real present-day user asked "who is
+oldname_7"** — the name launders itself through a legitimate, reinforcing
 speaker in a live chat, where no author- or chat-based filter can see it. That's
 why matching is on *text*, not author. `scrub_legacy.py --apply` cleans the
 backlog (it removes only name-bearing chain edges, phrases and factoids — it
 does not de-reinforce legacy lines). `blocklist_test.py` covers all three points.
+
+`DEFAULT_BLOCKED` ships empty on purpose: the handles that matter are a fact
+about one deployment's corpus, and hardcoding them would publish the exact list
+the feature exists to keep unpublished. Names come from `BUCKET_BLOCKED_NAMES`,
+unioned in at every use site. Don't reintroduce real handles here or in the
+tests — `blocklist_test.py` uses synthetic ones and sets the env var itself.
 
 `NON_PERSON_AUTHORS` is a separate, weaker thing: `webapp` (the Mini App's author
 tag), `seed`, `console` and `bucket2008` are still learned from normally, they
 just can't be *credited* by `_from_attribution`, which used to produce "webapp
 says ana has wet puh".
 
-Matching is whole-token and case-insensitive — `khorne` blocks but `khornetto`
+Matching is whole-token and case-insensitive — `pengu` blocks but `penguin`
 doesn't. Never make it substring-based; it would silently eat innocent words.
 
 ### Identity resolution (`bucket/db.py`)

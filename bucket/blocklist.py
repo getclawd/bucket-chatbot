@@ -1,61 +1,58 @@
 """Names Bucket must never say.
 
-The 2008 transcripts are full of people who never consented to being quoted by a
-bot in a different chat eighteen years later. Their handles are the one part of
-that material that shouldn't come back out.
+Any corpus drawn from a real chat community contains handles belonging to people
+who never agreed to be quoted by a bot — someone who left and asked to be
+scrubbed, a handle that is also a legal name, an old name someone no longer uses.
+Their words can stay. Their names shouldn't come back out.
 
-Two enforcement points, because either alone leaks:
+Set `BUCKET_BLOCKED_NAMES` to the handles your corpus needs suppressed. Three
+enforcement points, because any one alone leaks:
 
   learning    a blocked name never enters the chain, phrases or factoids, so
               composition can't emit it in the first place
   reply       any candidate reply containing one is rejected, which catches names
               that got into the corpus before they were blocked, or that arrive
               via live conversation
+  display     the introspection commands print corpus text verbatim, so they
+              redact — including the subject the user asked about
 
-The second is not redundant. `cypress_z` reached the live chain because a real
-user asked "who is cypress_z" after Bucket said it — a legacy name laundered
-through a present-day speaker, where no author- or chat-based filter can see it.
+The reply guard is not redundant with the learning guard. A name Bucket has
+already said can be handed straight back to it by a real, present-day user
+asking "who is oldname_7" — arriving through a legitimate reinforcing speaker in
+a live chat, where no author- or chat-based filter can see anything wrong. That
+is why matching is on *text*, never on author.
 
 Matching is whole-token and case-insensitive, on the same tokenization the rest
-of the engine uses, so "khorne" is blocked but "khornetto" is not. Substring
+of the engine uses, so "pengu" is blocked but "penguin" is not. Substring
 matching would silently eat innocent words.
 """
 
 import re
 
-# Speakers in the imported 2008 logs. Exact, from import_legacy.py's parse of the
-# `:Speaker:` labels — not guessed from capitalization, which is meaningless in
-# chat logs where people SHOUT and Capitalize At Random.
-LEGACY_SPEAKERS = frozenset({
-    "orkkaptin", "terranarachnid", "wibble", "richy", "bucket2008",
-    "khorne", "moogle",
-})
-
-# Names that appear *inside* the legacy transcripts rather than as speakers, so
-# no author or chat filter can reach them. Add to this as they surface; there is
-# no reliable way to extract them automatically (token-diffing the two corpora
-# fails once Bucket has said one out loud, and capitalization heuristics flag
-# "blood", "death" and "hey" as names).
-LEGACY_MENTIONED = frozenset({
-    "cypress_z", "ccrraaiikkyy3333", "orgmemberswinxx001",
-})
-
-# Deliberately excluded, despite being legacy speaker labels: "You", "The Spy"
-# and "The Scout" are a pronoun and TF2 class names, not personal handles.
-# Blocking "you" would make most of the corpus unsayable.
+# Ships empty on purpose. A blocklist is data about one specific corpus: the
+# handles that matter are the ones in *your* logs, and nobody else's deployment
+# is helped by carrying them. Hardcoding them here would also publish the exact
+# list of names the feature exists to keep unpublished.
+#
+# Populate it per-deployment via BUCKET_BLOCKED_NAMES in .env, which is unioned
+# in at every use site. Run scrub_legacy.py --apply after adding names to purge
+# them from the chain, phrases and factoids retroactively.
+#
+# Pick whole handles, not common words: matching is per-token, so blocking a
+# pronoun or an ordinary noun makes much of the corpus unsayable.
+DEFAULT_BLOCKED = frozenset()
 
 # Sources that are not people, and so must never be named as one. Bucket used to
 # say "webapp says ana has wet puh" — `webapp` is the author tag the Mini App
-# writes, not a person, and neither is `seed` (scaffolding) or `bucket2008` (a
-# dead bot). Distinct from the blocklist above: lines from these authors are still
-# learned from normally, they just can't be *credited* to anyone.
+# writes, not a person, and neither is `seed` (scaffolding) or `bucket2008` (the
+# original bot, whose transcripts some corpora include). Distinct from the
+# blocklist above: lines from these authors are still learned from normally, they
+# just can't be *credited* to anyone.
 # config.NAME is added at the use site, since it's configurable.
 NON_PERSON_AUTHORS = frozenset({"webapp", "seed", "bucket2008", "console"})
 
-DEFAULT_BLOCKED = LEGACY_SPEAKERS | LEGACY_MENTIONED
-
 # Same shape as text.tokenize's word notion, but keeps underscores and digits so
-# handles like `cypress_z` survive as one token.
+# handles like `oldname_7` survive as one token.
 _TOKEN_RE = re.compile(r"[a-z0-9_']+")
 
 
