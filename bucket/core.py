@@ -437,8 +437,8 @@ class Bucket:
         managed to parse into a triple; the chain generates from the utterance
         text, so it can freely emit a name it has no fact about. Reporting facts
         alone made it deny things it had demonstrably just said — it produced a
-        line about `cypress_z`, and answered `/literal cypress_z` with "i don't
-        know anything about cypress_z" while holding three lines containing it.
+        line about `oldname_7`, and answered `/literal oldname_7` with "i don't
+        know anything about oldname_7" while holding three lines containing it.
         """
         subject = normalize(subject)
         if not subject:

@@ -99,7 +99,8 @@ class Config:
     SEMANTIC_WEIGHT = _get_float("BUCKET_SEMANTIC_WEIGHT", 0.65)
 
     # --- names it must never say ---
-    # Added to the built-in legacy-transcript list in bucket/blocklist.py.
+    # The only place blocked handles are configured: DEFAULT_BLOCKED in
+    # bucket/blocklist.py ships empty on purpose.
     # Comma or space separated. Matched as whole words, case-insensitively.
     BLOCKED_NAMES = frozenset(
         n for n in _get("BUCKET_BLOCKED_NAMES", "").replace(",", " ").lower().split() if n

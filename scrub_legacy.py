@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
 """Purge blocked names from everything that feeds generation.
 
-The 2008 transcripts are worth keeping — the flavour is the reason they were
-imported. What isn't worth keeping is the *handles*: those people never agreed to
-be quoted by a bot in a different chat eighteen years later, and their names came
-back out recombined ("and someone finds cypress_z and tells him we won't let
-you"). Plus the Warhammer/Final Fantasy roleplay names, which nobody here cares
-about.
+An imported corpus is worth keeping — the flavour is the reason it was imported.
+What isn't worth keeping is the *handles*: those people never agreed to be quoted
+by a bot in a different chat, and their names come back out recombined ("and
+someone finds oldname_7 and tells him we won't let you").
 
-So this is deliberately narrow. It does NOT stop legacy lines feeding the chain —
-"BLOOD FOR THE BLOOD GOD" and the rest of the 2008 character stay exactly as they
-are. It removes only the chain edges, phrases and factoids that contain a blocked
-name, whoever said them.
+So this is deliberately narrow. It does NOT stop imported lines feeding the chain
+— the character of the corpus stays exactly as it is. It removes only the chain
+edges, phrases and factoids that contain a blocked name, whoever said them.
 
 "whoever said them" is the important part. A blocklist that filtered by author or
-by chat would miss the case that actually happened: Bucket said `cypress_z`, a
-present-day user asked "who is cypress_z", and that question — from a live,
-reinforcing speaker — put the name into the chain. The name launders itself
+by chat would miss the case that actually happens: Bucket says a name, a
+present-day user asks "who is oldname_7", and that question — from a live,
+reinforcing speaker — puts the name into the chain. The name launders itself
 through the current conversation.
 
 Going forward, learn.py refuses to learn from any line containing a blocked name

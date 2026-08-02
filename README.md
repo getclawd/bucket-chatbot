@@ -144,16 +144,17 @@ said *all work and no play makes jack a dull boy*.
 
 ## Names it won't say
 
-The 2008 transcripts were imported for their flavour, and that flavour stays —
-"BLOOD FOR THE BLOOD GOD" and the rest of it. What doesn't stay is the **handles**:
-the people in those logs never agreed to be quoted by a bot in a different chat
-eighteen years later, and Bucket was reassembling their names into new sentences:
+Feed Bucket a corpus from a real chat community and the flavour is the point —
+that stays. What shouldn't stay is the **handles**: people who never agreed to be
+quoted by a bot in a different chat, whose names Bucket happily reassembles into
+new sentences:
 
 ```
-and someone finds cypress_z and tells him we won't let you
+and someone finds oldname_7 and tells him we won't let you
 ```
 
-`BUCKET_BLOCKED_NAMES` extends a built-in list. A blocked name is enforced in
+`BUCKET_BLOCKED_NAMES` is the list, set per deployment — it ships empty, because
+which handles matter is a fact about *your* corpus. A blocked name is enforced in
 three places, because any one alone leaks:
 
 | | what it stops |
@@ -162,16 +163,16 @@ three places, because any one alone leaks:
 | replying | a candidate reply containing one is rejected outright |
 | display | `/literal` and `/recall` redact instead of printing |
 
-The reply guard isn't redundant. `cypress_z` got into the live chain because
-Bucket said it and **a real user asked "who is cypress_z"** — the name laundered
-itself through a legitimate present-day speaker, where filtering by author or by
-chat sees nothing wrong. 
+The reply guard isn't redundant. A name gets into the live chain because Bucket
+said it and **a real user asked "who is oldname_7"** — the name launders itself
+through a legitimate present-day speaker, where filtering by author or by chat
+sees nothing wrong.
 
-`python scrub_legacy.py --apply` purges the backlog. On the live corpus that was
+`python scrub_legacy.py --apply` purges the backlog. On a live corpus that was
 17 chain edges, 14 phrases and 1 factoid — and 0 of 300 generated replies named
-anyone afterwards, with all 8 "blood" phrases still intact. It deliberately does
-**not** stop legacy lines feeding generation; that would remove the content along
-with the names.
+anyone afterwards, with all 8 phrases built on the corpus's stock vocabulary
+still intact. It deliberately does **not** stop imported lines feeding
+generation; that would remove the content along with the names.
 
 Separately, `webapp`, `seed` and `console` are author tags, not people, so they
 can't be credited for a fact. Bucket used to say "webapp says ana has wet puh".
