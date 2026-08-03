@@ -190,8 +190,18 @@ INVENTORY_DROP_VERBS = r"drops?|throws?|puts\s+down|gives?|hands?|offers?|passes
 INVENTORY_ACTIVE_VERBS = r"uses?|wields?|holds?|(?:is\s+)?(?:using|wielding|holding)"
 INVENTORY_ARTICLES = r"(?:a|an|the|some|his|her|their|my|your)"
 INVENTORY_DISCARD_REPLY_RE = re.compile(
-    rf"\b(?:puts?\s+down|offers?\s+you|takes?)\s+"
+    rf"\b(?:puts?\s+down|offers?\s+you)\s+"
     rf"(?P<item>(?:{INVENTORY_ARTICLES}\s+)?[^.,!?*\n]+?)(?=$|[.,!?*\n])",
+    re.IGNORECASE,
+)
+INVENTORY_REPLY_RECEIVE_RE = re.compile(
+    rf"\b(?:{INVENTORY_RECEIVE_VERBS})\s+you\s+"
+    rf"(?P<item>[^.,!?*\n]+?)(?=$|[.,!?*\n])",
+    re.IGNORECASE,
+)
+INVENTORY_REPLY_DROP_RE = re.compile(
+    rf"\b(?:takes?|took)\s+"
+    rf"(?P<item>[^.,!?*\n]+?)(?=$|[.,!?*\n])",
     re.IGNORECASE,
 )
 
@@ -200,6 +210,7 @@ INVENTORY_DISCARD_REPLY_RE = re.compile(
 class InventoryEvent:
     action: str
     item: str
+    roleplay: bool = False
 
 
 def _clean_inventory_item(fragment: str) -> str | None:
@@ -213,6 +224,33 @@ def _clean_inventory_item(fragment: str) -> str | None:
     return item
 
 
+def _clean_inventory_items(fragment: str) -> list[str]:
+    """Normalize one or more coordinated item names.
+
+    A role-play gift such as ``a knife and a claude`` contains two items, not
+    one item whose name happens to contain ``and``. Only split when the next
+    clause starts with an article; phrases such as ``rock and roll`` remain a
+    single item.
+    """
+    parts = re.split(
+        rf"\s+and\s+(?={INVENTORY_ARTICLES}\s+)",
+        fragment or "",
+        flags=re.IGNORECASE,
+    )
+    items: list[str] = []
+    seen: set[str] = set()
+    bot_name = normalize(config.NAME)
+    for part in parts:
+        item = _clean_inventory_item(part)
+        if not item or normalize(item) == bot_name:
+            continue
+        key = normalize(item)
+        if key not in seen:
+            seen.add(key)
+            items.append(item)
+    return items
+
+
 def _inventory_name_pattern() -> str:
     return rf"\b{re.escape(config.NAME)}\b"
 
@@ -222,32 +260,50 @@ def inventory_discard_items(text: str) -> list[str]:
 
     These phrases can come from any reply strategy, not just the inventory
     strategy, so this is intentionally separate from the input event parser.
-    In generated speech, ``takes the knife`` is an established discard phrase
-    even though ``takes`` means receiving an item when a human teaches it.
+    Generated ``takes the knife`` text is deliberately not a discard signal:
+    when a human offers an item and Bucket says it takes it, the item should
+    remain in Bucket's inventory.
     """
     found: list[str] = []
     for match in INVENTORY_DISCARD_REPLY_RE.finditer(text or ""):
-        item = _clean_inventory_item(match.group("item"))
-        if item and item not in found:
-            found.append(item)
+        for item in _clean_inventory_items(match.group("item")):
+            if item not in found:
+                found.append(item)
     return found
 
 
-def parse_inventory_event(text: str) -> InventoryEvent | None:
-    """Recognize one directional inventory event involving Bucket.
+def parse_inventory_events(
+    text: str, *, reply_to_bucket: bool = False
+) -> list[InventoryEvent]:
+    """Recognize directional inventory events involving Bucket.
 
     Incoming events are the role-play forms already documented by the bot,
     such as ``alice gives bucket a rock``. Outgoing events require Bucket to be
     the grammatical subject, so ordinary messages that merely mention the bot
-    cannot accidentally remove an item.
+    cannot accidentally remove an item. When a human is replying to Bucket,
+    implicit forms such as ``offers you the rock`` and ``takes the rock`` are
+    interpreted as incoming and outgoing role-play actions respectively.
     """
     text = (text or "").strip()
     if not text or not config.NAME:
-        return None
+        return []
 
     name = _inventory_name_pattern()
-    if not re.search(name, text, re.IGNORECASE):
-        return None
+    if not re.search(name, text, re.IGNORECASE) and not reply_to_bucket:
+        return []
+
+    found: list[tuple[int, int, InventoryEvent]] = []
+
+    def add_events(
+        start: int,
+        action: str,
+        fragment: str,
+        *,
+        roleplay: bool = False,
+        priority: int = 0,
+    ) -> None:
+        for item in _clean_inventory_items(fragment):
+            found.append((start, priority, InventoryEvent(action, item, roleplay)))
 
     # Receive: "alice gives bucket a rock" and "alice gives a rock to bucket".
     for match in re.finditer(
@@ -258,43 +314,47 @@ def parse_inventory_event(text: str) -> InventoryEvent | None:
         rest = match.group("rest")
         recipient = re.search(name, rest, re.IGNORECASE)
         if recipient:
-            item = _clean_inventory_item(rest[recipient.end():])
-            if item:
-                return InventoryEvent(INVENTORY_RECEIVE, item)
+            after = rest[recipient.end():]
+            if after.strip():
+                add_events(match.start(), INVENTORY_RECEIVE, after)
+            else:
+                before = re.sub(r"\bto\s*$", "", rest[:recipient.start()],
+                                flags=re.IGNORECASE)
+                add_events(match.start(), INVENTORY_RECEIVE, before)
 
-            before = re.sub(r"\bto\s*$", "", rest[:recipient.start()],
-                            flags=re.IGNORECASE)
-            item = _clean_inventory_item(before)
-            if item:
-                return InventoryEvent(INVENTORY_RECEIVE, item)
+    # Reply-style receive: "offers you the knife". This is only enabled when
+    # the transport knows the human message is a reply to Bucket; otherwise a
+    # generic sentence containing "you" must not mutate inventory.
+    if reply_to_bucket:
+        for match in INVENTORY_REPLY_RECEIVE_RE.finditer(text):
+            add_events(
+                match.start(), INVENTORY_RECEIVE, match.group("item"),
+                roleplay=True,
+            )
 
     # Pick up / take: "bucket picks up the hammer".
-    match = re.search(
+    for match in re.finditer(
         rf"{name}\s+(?:picks?\s+up|picked\s+up|takes?|took)\s+"
         rf"(?P<item>[^.,!?*]+)",
         text,
         re.IGNORECASE,
-    )
-    if match:
-        item = _clean_inventory_item(match.group("item"))
-        if item:
-            return InventoryEvent(INVENTORY_RECEIVE, item)
+    ):
+        add_events(match.start(), INVENTORY_RECEIVE, match.group("item"))
 
     # Outgoing events: Bucket must precede the action. This prevents a human
     # saying "Alice gives Bucket a rock" from taking the remove path.
-    match = re.search(
+    for match in re.finditer(
         rf"{name}\s+(?P<verb>{INVENTORY_DROP_VERBS})\s+"
         rf"(?P<rest>[^.,!?*]+)",
         text,
         re.IGNORECASE,
-    )
-    if match:
+    ):
         verb = match.group("verb").lower()
         rest = match.group("rest").strip()
         rest = re.sub(r"^(?:away|back)\s+", "", rest, flags=re.IGNORECASE)
 
         if verb.startswith(("drop", "throw", "put")):
-            item = _clean_inventory_item(rest)
+            item_fragment = rest
         else:
             # Support both "Bucket gives the knife to Alice" and
             # "Bucket gives Alice the knife". The latter intentionally only
@@ -308,27 +368,45 @@ def parse_inventory_event(text: str) -> InventoryEvent | None:
                 rest,
                 re.IGNORECASE,
             )
-            item = _clean_inventory_item(
+            item_fragment = (
                 explicit_target.group("item") if explicit_target else
                 recipient_first.group("item") if recipient_first else rest
             )
-        if item:
-            return InventoryEvent(INVENTORY_DROP, item)
+        add_events(match.start(), INVENTORY_DROP, item_fragment, priority=1)
+
+    # In a reply to Bucket, an unqualified "takes the item" means the human
+    # took it away from Bucket. This is intentionally not enabled for ordinary
+    # messages: user commands must not mutate inventory state.
+    if reply_to_bucket:
+        for match in INVENTORY_REPLY_DROP_RE.finditer(text):
+            prefix = text[:match.start()]
+            if re.search(rf"{name}\s*$", prefix, re.IGNORECASE):
+                continue
+            add_events(
+                match.start(), INVENTORY_DROP, match.group("item"),
+                roleplay=True, priority=1,
+            )
 
     # Use / wield / hold: these do not create an item, but make an existing
     # one active so the inventory strategy can prefer it.
-    match = re.search(
+    for match in re.finditer(
         rf"{name}\s+(?:{INVENTORY_ACTIVE_VERBS})\s+"
         rf"(?P<item>[^.,!?*]+)",
         text,
         re.IGNORECASE,
-    )
-    if match:
-        item = _clean_inventory_item(match.group("item"))
-        if item:
-            return InventoryEvent(INVENTORY_ACTIVATE, item)
+    ):
+        add_events(match.start(), INVENTORY_ACTIVATE, match.group("item"), priority=2)
 
-    return None
+    found.sort(key=lambda entry: (entry[0], entry[1]))
+    return [event for _, _, event in found]
+
+
+def parse_inventory_event(
+    text: str, *, reply_to_bucket: bool = False
+) -> InventoryEvent | None:
+    """Backward-compatible first-event view of :func:`parse_inventory_events`."""
+    events = parse_inventory_events(text, reply_to_bucket=reply_to_bucket)
+    return events[0] if events else None
 
 # A sentence opening with one of these is a question, not an assertion.
 # "bucket did you know you are gay" would otherwise be stored as a fact about
@@ -390,7 +468,9 @@ class Learner:
         self.db = db
 
     def ingest(self, text: str, author: str = "", chat: str = "",
-               previous_id: int | None = None, reinforce: bool = True) -> int | None:
+               previous_id: int | None = None, reinforce: bool = True,
+               reply_to_bucket: bool = False,
+               inventory_text: str | None = None) -> int | None:
         """Absorb one line. Returns the utterance id so it can be chained to the next.
 
         `reinforce=False` (used for Bucket's own replies) learns the line without
@@ -433,7 +513,11 @@ class Learner:
         self._learn_chain(text)
         self._learn_phrases(text)
         self._learn_factoid(text, author)
-        self._learn_item(text, author)
+        self._learn_item(
+            text if inventory_text is None else inventory_text,
+            author,
+            reply_to_bucket=reply_to_bucket,
+        )
         return uid
 
     # ------------------------------------------------------------------
@@ -584,16 +668,23 @@ class Learner:
         self.db.add_factoid(subject, VERB_CANONICAL.get(verb, verb), obj, author=author)
 
     # ------------------------------------------------------------------
-    def _learn_item(self, text: str, author: str) -> str | None:
-        """Apply a directional inventory event, if the line contains one."""
-        event = parse_inventory_event(text)
-        if event is None:
-            return None
+    def _learn_item(self, text: str, author: str,
+                    reply_to_bucket: bool = False) -> str | None:
+        """Apply role-play inventory events during human message ingestion.
 
-        if event.action == INVENTORY_RECEIVE:
-            return self.db.add_item(event.item, author, config.INVENTORY_SIZE)
-        if event.action == INVENTORY_DROP:
-            return event.item if self.db.remove_item(event.item) else None
-        if event.action == INVENTORY_ACTIVATE:
-            return event.item if self.db.activate_item(event.item) else None
-        return None
+        Explicit named events retain the existing command behavior. In a reply
+        to Bucket, implicit role-play ``takes the item`` clauses are also
+        allowed to remove an item; without reply context, those unqualified
+        clauses are ignored.
+        """
+        changed = None
+        for event in parse_inventory_events(text, reply_to_bucket=reply_to_bucket):
+            if event.action == INVENTORY_RECEIVE:
+                changed = self.db.add_item(event.item, author, config.INVENTORY_SIZE)
+            elif event.action == INVENTORY_DROP:
+                if self.db.remove_item(event.item):
+                    changed = event.item
+            elif event.action == INVENTORY_ACTIVATE:
+                if self.db.activate_item(event.item):
+                    changed = event.item
+        return changed

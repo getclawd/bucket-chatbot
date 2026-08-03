@@ -12,15 +12,18 @@ os.environ["BUCKET_LLM_BACKEND"] = "none"
 os.environ["BUCKET_EMBED_BACKEND"] = "none"
 os.environ["BUCKET_SEED"] = "0"
 
-from bucket import Bucket  # noqa: E402
+from bucket import Bucket, config  # noqa: E402
 from bucket.brain import Brain, Reply  # noqa: E402
 from bucket.db import BucketDB  # noqa: E402
 from bucket.learn import (  # noqa: E402
     INVENTORY_ACTIVATE,
     INVENTORY_DROP,
     INVENTORY_RECEIVE,
+    inventory_discard_items,
     parse_inventory_event,
+    parse_inventory_events,
 )
+from telegram_bot import message_text  # noqa: E402
 
 
 def main() -> int:
@@ -73,6 +76,66 @@ def main() -> int:
     if bot.db.items() != before or bot.db.remove_item("nonexistent sword"):
         failures.append("failed drop changed inventory")
     print(f"  failed drop leaves inventory unchanged: {bot.db.items() == before}")
+
+    print("\n=== reply role-play and compound gifts ===")
+    reply_bot = Bucket(
+        db_path=os.path.join(tempfile.mkdtemp(), "reply.sqlite3"), quiet=True
+    )
+    reply_bot.learner.ingest(
+        "*offers you the knife*", author="alice", chat="t", reply_to_bucket=True
+    )
+    reply_bot.learner.ingest(
+        "*gives bucket a knife and a claude*",
+        author="alice", chat="t", reply_to_bucket=True,
+    )
+    if set(reply_bot.db.items()) != {"knife", "claude"}:
+        failures.append(f"reply/compound gift parsed incorrectly: {reply_bot.db.items()}")
+
+    events = parse_inventory_events(
+        "*takes claude* *gives bucket a bucket*", reply_to_bucket=True
+    )
+    if [(event.action, event.item) for event in events] != [(INVENTORY_DROP, "claude")]:
+        failures.append(f"multiple reply actions parsed incorrectly: {events}")
+    reply_bot.learner.ingest(
+        "*takes claude* *gives bucket a bucket*",
+        author="alice", chat="t", reply_to_bucket=True,
+    )
+    if reply_bot.db.items() != ["knife"]:
+        failures.append(f"reply take/self-name handling failed: {reply_bot.db.items()}")
+    reply_bot.close()
+
+    telegram_message = {
+        "text": "*takes claude* *gives bucket a bucket*",
+        "quote": {"text": "i'm going to give you a claude"},
+    }
+    if message_text(telegram_message, include_quote=False) != telegram_message["text"]:
+        failures.append("Telegram quote was not excluded from inventory text")
+
+    integration_bot = Bucket(
+        db_path=os.path.join(tempfile.mkdtemp(), "integration-reply.sqlite3"), quiet=True
+    )
+    config.LEARN = True
+    integration_bot.brain.respond = (
+        lambda _text, context="", avoid=(): Reply("*takes the knife*", "markov")
+    )
+    integration_bot.handle(
+        "*offers you the knife*", author="alice", chat="reply", is_reply_to_bot=True
+    )
+    if integration_bot.db.items() != ["knife"]:
+        failures.append(
+            f"reply offer was lost during generated takes response: "
+            f"{integration_bot.db.items()}"
+        )
+    integration_bot.close()
+
+    ignored_bot = Bucket(
+        db_path=os.path.join(tempfile.mkdtemp(), "ignored-reply.sqlite3"), quiet=True
+    )
+    ignored_bot.learner.ingest("*offers you the coin*", author="alice", chat="t")
+    if ignored_bot.db.items():
+        failures.append("offer without reply context mutated inventory")
+    ignored_bot.close()
+    print("  reply offer, split gift, multi-action, and self-name checks complete")
 
     # Bucket's own output is stored but must never trigger inventory mutations.
     bot.learner.ingest(
@@ -127,7 +190,6 @@ def main() -> int:
     for index, phrase in enumerate((
         "*puts down the knife*",
         "*offers you the knife*",
-        "*takes the knife*",
     )):
         phrase_bot.db.add_item("knife", "alice", 12)
         phrase_bot.brain.respond = lambda _text, context="", avoid=(), phrase=phrase: Reply(
@@ -136,7 +198,19 @@ def main() -> int:
         phrase_bot.speak("say something", chat=f"phrase:{index}")
         if "knife" in phrase_bot.db.items():
             failures.append(f"spoken discard phrase did not remove the knife: {phrase}")
-    print(f"  removed after puts/offers/takes: {'knife' not in phrase_bot.db.items()}")
+    phrase_bot.db.add_item("knife", "alice", 12)
+    phrase_bot.brain.respond = lambda _text, context="", avoid=(): Reply(
+        "*takes the knife*", "markov"
+    )
+    phrase_bot.speak("say something", chat="takes")
+    if "knife" not in phrase_bot.db.items():
+        failures.append("spoken takes phrase incorrectly removed the knife")
+    if inventory_discard_items("*takes the knife*"):
+        failures.append("takes phrase still classified as a discard")
+    print(
+        f"  puts/offers remove; takes preserves: "
+        f"{'knife' in phrase_bot.db.items()}"
+    )
     phrase_bot.close()
 
     bot.close()
