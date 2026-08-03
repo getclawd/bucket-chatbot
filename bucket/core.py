@@ -16,7 +16,7 @@ from .embed import Embedder, VectorIndex, pack
 from .learn import Learner, inventory_discard_items
 from .llm import Polisher  # noqa: F401  (also used by explain())
 from .seed import load_seed
-from .text import content_words, normalize, tokenize
+from .text import content_words, normalize, tokenize, trim_dangling
 
 # Names redacted from anything shown to a user. Same list the learning and reply
 # guards use — see blocklist.py.
@@ -295,7 +295,12 @@ class Bucket:
         so you can poke at it without feeding the corpus.
         """
         with self._lock:
-            if learn:
+            # `learn` is the Mini App's toggle; BUCKET_LEARN=0 is "the database
+            # is frozen" and has to win over it, exactly as it does in handle()
+            # and learn_only(). Without this check the webapp was the one way
+            # into the corpus that ignored the setting entirely.
+            learned = bool(learn and config.LEARN)
+            if learned:
                 uid = self.learner.ingest(text, author="webapp", chat=chat)
                 if uid is not None:
                     self._remember(uid, text)
@@ -309,7 +314,7 @@ class Bucket:
                 )
             )
             invented = Polisher.invented_words(reply.text, polished)
-            shown = (polished or reply.text).strip()
+            shown = self._finish(polished, reply.text)
             self._apply_spoken_inventory_actions(shown)
 
             candidates = []
@@ -320,20 +325,22 @@ class Bucket:
                 for uid_, score in hits:
                     row = self.db.get_utterance(uid_)
                     if row:
+                        # Raw corpus text, same as /recall — so it redacts.
                         candidates.append(
                             {"source": label, "score": round(float(score), 3),
-                             "text": row["text"], "author": row["author"] or "?"}
+                             "text": self.redact(row["text"]),
+                             "author": self.redact(row["author"] or "?")}
                         )
 
             return {
                 "reply": shown,
                 "strategy": reply.strategy,
-                "raw": reply.text,
+                "raw": self.redact(reply.text),
                 "polished_differs": polished.strip() != reply.text.strip(),
                 "polish_rejected": bool(invented),
                 "invented": invented,
                 "candidates": candidates,
-                "learned": learn,
+                "learned": learned,
             }
 
     @staticmethod
@@ -343,6 +350,29 @@ class Bucket:
         if len(words) <= config.MAX_REPLY_WORDS:
             return text.strip()
         return " ".join(words[: config.MAX_REPLY_WORDS])
+
+    @staticmethod
+    def _finish(polished: str, raw: str) -> str:
+        """Last pass over a reply after polish and capping.
+
+        `Brain.respond` already ran `trim_dangling`, but it ran it on the *engine*
+        output. The polish layer may delete and reorder words afterwards, and the
+        cap may cut the tail off, so a line that left the brain ending cleanly can
+        arrive here ending on a word that needs something after it. Observed live:
+
+            engine   : bucket says because jay has a wet puh
+            polished : bucket says jay has a wet puh because of
+
+        The reorder is legal — no word was invented — but the result reads as cut
+        off. Re-trimming here is safe because both layers only ever remove words.
+        If trimming empties the polished line, fall back to the engine text, which
+        `respond` already vetted; never return "" and mute the bot.
+        """
+        shown = Bucket._cap(polished or raw)
+        trimmed = trim_dangling(shown)
+        if trimmed:
+            return trimmed
+        return trim_dangling(Bucket._cap(raw)) or raw.strip()
 
     def learn_only(self, text: str, author: str = "", chat: str = "") -> None:
         """Absorb a line without considering a reply — edits, backfill, imports."""
@@ -367,7 +397,7 @@ class Bucket:
                     reply.text, user_text=text, strategy=reply.strategy
                 )
             )
-            out = self._cap(out or reply.text)
+            out = self._finish(out, reply.text)
 
             # Its own line joins the no-repeat window, so the next reply in this
             # chat won't be the same one again. Polished text, not reply.text —
@@ -526,15 +556,19 @@ class Bucket:
             return "who what"
 
         rows = self.db.factoids_by_predicate(predicate)
+        # Echoed back below, so redact once here — same reasoning as cmd_literal.
+        shown = self.redact(predicate)
         if not rows:
-            return f"nobody i know of {predicate}"
+            return f"nobody i know of {shown}"
 
         seen: dict[str, str] = {}
         for row in rows:
             seen.setdefault(row["subject"], f"{row['verb']} {row['object']}")
-        lines = [f"things that match '{predicate}':"]
+        lines = [f"things that match '{shown}':"]
         for subject, predicate_text in list(seen.items())[:12]:
-            lines.append(f"  {subject} {predicate_text[:60]}")
+            # A reverse lookup prints subjects straight out of the factoid table,
+            # which is exactly where a blocked name can still be sitting.
+            lines.append(f"  {self.redact(subject)} {self.redact(predicate_text)[:60]}")
         return "\n".join(lines)
 
     def cmd_about(self, name: str) -> str:
@@ -558,20 +592,24 @@ class Bucket:
         lines_said = lines_said[:5]
 
         if not facts and not total:
-            return f"i've got nothing on {name}"
+            return f"i've got nothing on {self.redact(name)}"
 
-        out = [f"{canonical}:"]
+        # Everything below prints corpus text and factoid columns verbatim — the
+        # same material /literal redacts. A blocked handle is very likely to be an
+        # *author* here (it names a person), so `/about <blocked name>` was the
+        # sharpest version of this leak: it dumps their lines back on request.
+        out = [f"{self.redact(canonical)}:"]
         if other_names:
-            out.append(f"  also known as: {', '.join(other_names)}")
+            out.append(f"  also known as: {', '.join(self.redact(n) for n in other_names)}")
         if facts:
             out.append(f"  what i've been told ({len(facts)}):")
             for row in facts[:8]:
-                out.append(f"    {row['verb']} {row['object'][:52]}")
+                out.append(f"    {self.redact(row['verb'])} {self.redact(row['object'])[:52]}")
         if total:
             out.append(f"  has said {total} things to me, including:")
             for row in lines_said:
                 repeat = f" (x{row['count']})" if row["count"] > 1 else ""
-                out.append(f"    {row['text'][:56]}{repeat}")
+                out.append(f"    {self.redact(row['text'])[:56]}{repeat}")
         return "\n".join(out)
 
     def cmd_forget(self, subject: str) -> str:

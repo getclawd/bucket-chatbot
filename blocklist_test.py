@@ -25,6 +25,7 @@ config reads the environment once at import time.
     python blocklist_test.py
 """
 
+import json
 import os
 import sys
 import tempfile
@@ -76,6 +77,13 @@ def main() -> int:
     for line in ["blood for the blood god", "wet puh is good", "ana has wet puh"]:
         bot.handle(line, author="Elle", chat="dc:1", is_private=True)
 
+    # A blocked handle as an *author*. This is the shape /about turns into a
+    # targeted dump: the name is the thing you look someone up by, and their
+    # lines come back verbatim. The line text itself is innocuous on purpose —
+    # the leak is the attribution, not the content.
+    for line in ["the server room floods when it rains", "i hate mondays"]:
+        bot.handle(line, author="corvid", chat="dc:1", is_private=True)
+
     from bucket.learn import BLOCKED as LEARN_BLOCKED
 
     chain_leaks = [
@@ -126,15 +134,49 @@ def main() -> int:
         failures.append(f"{len(offenders)}/{len(said)} replies named a blocked person")
 
     # --- 4. introspection redacts --------------------------------------
+    # Every command that prints corpus text or factoid columns, not just the two
+    # that originally did it. /about and /who both shipped unredacted: /about
+    # dumps an author's lines on request, and /who prints factoid subjects
+    # straight out of the table.
     print("\n=== commands redact instead of printing ===")
-    for cmd, arg in (("literal", "oldname_7"), ("recall", "oldname_7")):
+    checks = [
+        ("literal", "oldname_7"),
+        ("recall", "oldname_7"),
+        ("about", "corvid"),
+        ("about", "oldname_7"),
+        ("who", "my friend"),
+        ("who", "demands blood"),
+    ]
+    for cmd, arg in checks:
         out = getattr(bot, f"cmd_{cmd}")(arg)
-        leaked = LEARN_BLOCKED.blocks(out)
-        print(f"  /{cmd} {arg} -> leaks a name: {leaked}")
+        leaked = LEARN_BLOCKED.hits(out)
+        print(f"  /{cmd} {arg!r:<16} -> leaks: {sorted(leaked) or 'nothing'}")
         if leaked:
-            failures.append(f"/{cmd} printed a blocked name")
-    print(f"\n  /literal output:\n      " + "\n      ".join(
-        bot.cmd_literal("oldname_7").splitlines()[:4]))
+            failures.append(f"/{cmd} {arg!r} printed {sorted(leaked)}")
+    print(f"\n  /about corvid output:\n      " + "\n      ".join(
+        bot.cmd_about("corvid").splitlines()[:4]))
+
+    # --- 4b. the mini app is the same corpus over http ------------------
+    # Same material, different surface. These return raw rows, so they need the
+    # same redaction the chat commands have.
+    print("\n=== mini app endpoints redact ===")
+    from webapp.server import Handler  # noqa: E402
+
+    api = Handler.__new__(Handler)
+    Handler.bot = bot
+    payloads = {
+        "/api/people": api._people(),
+        "/api/about?name=corvid": api._about("corvid"),
+        "/api/about?name=oldname_7": api._about("oldname_7"),
+        "/api/facts": api._facts("", 200),
+        "/api/recall?q=friend": api._recall("friend"),
+        "explain()": bot.explain("who is oldname_7", learn=False),
+    }
+    for name, payload in payloads.items():
+        leaked = LEARN_BLOCKED.hits(json.dumps(payload))
+        print(f"  {name:<26} leaks: {sorted(leaked) or 'nothing'}")
+        if leaked:
+            failures.append(f"{name} returned {sorted(leaked)}")
 
     # --- 5. non-people are never credited ------------------------------
     # "webapp says ana has wet puh" — webapp is the Mini App's author tag.

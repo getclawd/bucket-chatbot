@@ -283,6 +283,9 @@ class BucketBot:
         print(f"bucket is awake as @{self.username}")
         print(f"polish layer: {self.bot.polisher.status()}")
         print(f"chattiness: {config.CHATTINESS}  |  learning: {'on' if config.LEARN else 'off'}")
+        if not config.ADMIN_IDS:
+            print("telegram: BUCKET_ADMIN_IDS is unset — /forget, /chattiness and "
+                  "/wipe are disabled for everyone.", file=sys.stderr)
         print("ctrl-c to stop\n")
 
         conflicts = 0
@@ -386,7 +389,10 @@ class BucketBot:
         if target and target.lower() != self.username:
             return False
 
-        is_admin = not config.ADMIN_IDS or sender.get("id") in config.ADMIN_IDS
+        # Default deny. This used to be `not config.ADMIN_IDS or ...`, so leaving
+        # BUCKET_ADMIN_IDS unset handed /wipe — which destroys the whole corpus
+        # irreversibly — to every member of every chat the bot is in.
+        is_admin = sender.get("id") in config.ADMIN_IDS
 
         if command in ("start", "help"):
             self.client.send(chat_id, HELP_TEXT)

@@ -127,6 +127,51 @@ def main() -> int:
             if exc.code != 403:
                 failures.append(f"{label} returned {exc.code}, expected 403")
 
+    print("\n=== BUCKET_LEARN=0 freezes the corpus, webapp included ===")
+    # explain(learn=True) is the Mini App's learn toggle, and it was the one path
+    # into the corpus that ignored BUCKET_LEARN entirely — handle() and
+    # learn_only() both gate on it.
+    saved_learn = config.LEARN
+    for label, learn_setting, toggle, should_grow in [
+        ("learning on,  toggle on ", True, True, True),
+        ("learning on,  toggle off", True, False, False),
+        ("learning off, toggle on ", False, True, False),
+    ]:
+        config.LEARN = learn_setting
+        before = bot.db.stats()["utterances"]
+        result = bot.explain(f"a zebra is a striped horse {label}", learn=toggle)
+        grew = bot.db.stats()["utterances"] > before
+        ok = grew == should_grow and result["learned"] == should_grow
+        print(f"  [{'ok ' if ok else 'FAIL'}] {label} -> corpus grew: {grew}, "
+              f"reported learned: {result['learned']}")
+        if not ok:
+            failures.append(f"{label}: grew={grew} reported={result['learned']}, "
+                            f"expected {should_grow}")
+    config.LEARN = saved_learn
+
+    print("\n=== the guest list fails closed ===")
+    # A correctly signed payload from someone who is not on the guest list must
+    # still be refused. The guard used to read `and config.ADMIN_IDS`, so an
+    # unset BUCKET_ADMIN_IDS — the shipped default — skipped the check entirely
+    # and served the whole corpus to any Telegram user over the public tunnel.
+    saved = (config.WEBAPP_ALLOW_ALL, config.ADMIN_IDS)
+    for label, allow_all, admins, expected in [
+        ("no admins configured", False, frozenset(), 403),
+        ("signed but not an admin", False, frozenset({999}), 403),
+        ("on the guest list", False, frozenset({1000000001}), 200),
+        ("allow-all opted in", True, frozenset(), 200),
+    ]:
+        config.WEBAPP_ALLOW_ALL, config.ADMIN_IDS = allow_all, admins
+        try:
+            code = call("/api/stats")[0]
+        except urllib.error.HTTPError as exc:
+            code = exc.code
+        ok = code == expected
+        print(f"  [{'ok ' if ok else 'FAIL'}] {label:<26} http {code} (want {expected})")
+        if not ok:
+            failures.append(f"guest list: {label} returned {code}, expected {expected}")
+    config.WEBAPP_ALLOW_ALL, config.ADMIN_IDS = saved
+
     print("\n=== static files and traversal ===")
     for target, expected in [("/", 200), ("/app.js", 200), ("/app.css", 200),
                              ("/../bucket.sqlite3", 404), ("/nope", 404)]:

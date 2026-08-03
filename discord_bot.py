@@ -57,6 +57,9 @@ class BucketDiscordClient(discord.Client if discord else object):
 
     async def on_ready(self) -> None:
         print(f"discord: connected as {self.user} ({self.user.id})")
+        if not config.DISCORD_ADMIN_IDS:
+            print("discord: BUCKET_DISCORD_ADMIN_IDS is unset — !forget, !chattiness "
+                  "and !wipe are disabled for everyone.", file=sys.stderr)
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -135,9 +138,10 @@ class BucketDiscordClient(discord.Client if discord else object):
         argument = argument.strip()
         chat = f"dc:{message.channel.id}"
 
-        is_admin = (
-            not config.DISCORD_ADMIN_IDS or message.author.id in config.DISCORD_ADMIN_IDS
-        )
+        # Default deny — see the matching note in telegram_bot.py. With
+        # BUCKET_DISCORD_ADMIN_IDS unset, !wipe was available to anyone in any
+        # channel the bot could see.
+        is_admin = message.author.id in config.DISCORD_ADMIN_IDS
         bot = self.bot
 
         async def run(fn, *args):

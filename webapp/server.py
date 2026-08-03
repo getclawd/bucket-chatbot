@@ -16,6 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from bucket import Bucket, config
+from bucket.core import BLOCKED
 
 STATIC = Path(__file__).resolve().parent / "static"
 MAX_BODY = 64 * 1024
@@ -75,9 +76,13 @@ class Handler(BaseHTTPRequestHandler):
         )
         if not user:
             return None, "open this from inside telegram"
-        if not config.WEBAPP_ALLOW_ALL and config.ADMIN_IDS:
-            if user.get("id") not in config.ADMIN_IDS:
-                return None, "not on the guest list"
+        # Default deny. This used to read `and config.ADMIN_IDS`, so an unset
+        # BUCKET_ADMIN_IDS — the shipped default — meant *every* Telegram user who
+        # could open the bot got the whole corpus over the public tunnel, which is
+        # the opposite of what .env.example promises. Opening it up is now an
+        # explicit choice: set BUCKET_WEBAPP_ALLOW_ALL=1.
+        if not config.WEBAPP_ALLOW_ALL and user.get("id") not in config.ADMIN_IDS:
+            return None, "not on the guest list"
         return user, ""
 
     def _send(self, status: int, body: bytes, content_type: str) -> None:
@@ -176,13 +181,19 @@ class Handler(BaseHTTPRequestHandler):
         for author in bot.db.known_authors():
             if author.lower() == config.NAME:
                 continue
+            # Dropped, not redacted. This endpoint is a list of *people*, and a
+            # blocked handle is a person — rendering them as "[redacted]" would
+            # still confirm they exist and publish their line and fact counts.
+            if BLOCKED.blocks(author):
+                continue
             canonical = bot.db.resolve(author)
             people.append({
-                "name": author,
-                "canonical": canonical,
+                "name": bot.redact(author),
+                "canonical": bot.redact(canonical),
                 "lines": bot.db.author_total(author),
                 "facts": len(bot.db.factoids_for(canonical)),
-                "aliases": [a for a in bot.db.aliases_of(canonical) if a != author],
+                "aliases": [bot.redact(a) for a in bot.db.aliases_of(canonical)
+                            if a != author and not BLOCKED.blocks(a)],
             })
         people.sort(key=lambda p: -p["lines"])
         return {"people": people}
@@ -201,14 +212,15 @@ class Handler(BaseHTTPRequestHandler):
             )
         lines.sort(key=lambda r: -r["count"])
         return {
-            "name": canonical,
-            "aliases": sorted(a for a in every if a != canonical),
+            "name": bot.redact(canonical),
+            "aliases": sorted(bot.redact(a) for a in every if a != canonical),
             "facts": [
-                {"verb": r["verb"], "object": r["object"],
-                 "count": r["count"], "author": r["author"]}
+                {"verb": bot.redact(r["verb"]), "object": bot.redact(r["object"]),
+                 "count": r["count"], "author": bot.redact(r["author"] or "?")}
                 for r in bot.db.factoids_for(canonical)
             ],
-            "lines": lines[:25],
+            "lines": [{"text": bot.redact(r["text"]), "count": r["count"]}
+                      for r in lines[:25]],
             "total": sum(bot.db.author_total(one) for one in every),
         }
 
@@ -228,9 +240,11 @@ class Handler(BaseHTTPRequestHandler):
             if key in seen:
                 continue
             seen.add(key)
-            facts.append({"subject": row["subject"], "verb": row["verb"],
-                          "object": row["object"], "count": row["count"],
-                          "author": row["author"] or "?"})
+            facts.append({"subject": bot.redact(row["subject"]),
+                          "verb": bot.redact(row["verb"]),
+                          "object": bot.redact(row["object"]),
+                          "count": row["count"],
+                          "author": bot.redact(row["author"] or "?")})
         return {"facts": facts[:limit]}
 
     def _recall(self, query: str) -> dict:
@@ -246,8 +260,10 @@ class Handler(BaseHTTPRequestHandler):
             for uid, score in hits:
                 row = bot.db.get_utterance(uid)
                 if row:
-                    rows.append({"score": round(float(score), 3), "text": row["text"],
-                                 "author": row["author"] or "?"})
+                    # The web equivalent of /recall, so it redacts like /recall.
+                    rows.append({"score": round(float(score), 3),
+                                 "text": bot.redact(row["text"]),
+                                 "author": bot.redact(row["author"] or "?")})
             out[label] = rows
         return out
 

@@ -79,9 +79,35 @@ def main() -> int:
             print(f"         invented:  {invented}")
             failures.append(why)
 
-    # --- live: nothing invented may ever reach the user --------------------
+    # --- polish must not leave a reply hanging -----------------------------
+    # trim_dangling runs inside Brain.respond, on the *engine* output. Polish
+    # runs after it and may delete and reorder words, so it can put a dangling
+    # word on the end of a line that left the brain ending cleanly. Observed
+    # live, with llama3.1:8b:
+    #   engine   : bucket says because jay has a wet puh
+    #   polished : bucket says jay has a wet puh because of
+    # A pure reorder, so the invented-words guard passes it. Bucket._finish is
+    # the re-check.
     os.environ.pop("BUCKET_LLM_BACKEND", None)
     from bucket import Bucket, config  # noqa: E402
+
+    print("\n=== a polished line can't end on a hanging word ===")
+    FINISH_CASES = [
+        # (polished, raw engine text, expected)
+        ("bucket says jay has a wet puh because of", "bucket says because jay has a wet puh",
+         "bucket says jay has a wet puh"),
+        ("this one is already fine", "this one is already fine",
+         "this one is already fine"),
+        # Polish emptied it down to nothing but filler — fall back to the engine
+        # text rather than muting the bot.
+        ("and of the", "the cheese is good", "the cheese is good"),
+    ]
+    for polished, raw, expected in FINISH_CASES:
+        got = Bucket._finish(polished, raw)
+        ok = got == expected
+        print(f"  [{'ok ' if ok else 'FAIL'}] {polished!r} -> {got!r}")
+        if not ok:
+            failures.append(f"_finish({polished!r}) gave {got!r}, wanted {expected!r}")
 
     if config.LLM_BACKEND in ("none", "off", ""):
         print("\n(polish backend disabled — skipping the live half)")
