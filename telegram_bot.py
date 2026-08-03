@@ -22,7 +22,7 @@ from bucket.lock import InstanceLock
 API = "https://api.telegram.org/bot{token}/{method}"
 
 
-def message_text(message: dict) -> str:
+def message_text(message: dict, *, include_quote: bool = True) -> str:
     """Everything worth learning from a message, not just its `text` field.
 
     A group chat is mostly not plain text. Stickers carry an emoji, photos and
@@ -41,9 +41,10 @@ def message_text(message: dict) -> str:
         parts.extend(option.get("text", "") for option in poll.get("options") or [])
 
     # Text the sender quoted from an earlier message.
-    quote = message.get("quote") or {}
-    if quote.get("text"):
-        parts.append(quote["text"])
+    if include_quote:
+        quote = message.get("quote") or {}
+        if quote.get("text"):
+            parts.append(quote["text"])
 
     return " ".join(part.strip() for part in parts if part and part.strip()).strip()
 
@@ -341,6 +342,7 @@ class BucketBot:
             return
 
         text = message_text(message)
+        inventory_text = message_text(message, include_quote=False)
         if not text.strip():
             return
 
@@ -370,6 +372,7 @@ class BucketBot:
             chat=f"tg:{chat_id}",
             is_private=is_private,
             is_reply_to_bot=is_reply_to_bot,
+            inventory_text=inventory_text,
         )
         if reply:
             self.client.send(chat_id, reply, reply_to=message["message_id"])

@@ -252,7 +252,8 @@ class Bucket:
 
     # ------------------------------------------------------------------
     def handle(self, text: str, author: str = "", chat: str = "",
-               is_private: bool = False, is_reply_to_bot: bool = False) -> str | None:
+               is_private: bool = False, is_reply_to_bot: bool = False,
+               inventory_text: str | None = None) -> str | None:
         """Learn from a message, then reply if it feels like it.
 
         Blocking — it may call out to an embedding model and an LLM. Surfaces
@@ -266,7 +267,10 @@ class Bucket:
             uid = None
             if config.LEARN:
                 uid = self.learner.ingest(
-                    text, author=author, chat=chat, previous_id=self._last_utterance.get(chat)
+                    text, author=author, chat=chat,
+                    previous_id=self._last_utterance.get(chat),
+                    reply_to_bucket=is_reply_to_bot,
+                    inventory_text=inventory_text,
                 )
                 if uid is not None:
                     self._last_utterance[chat] = uid
