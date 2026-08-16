@@ -1,0 +1,12 @@
+# The engine, the Telegram client and the Ollama backends use only the standard
+# library. Bucket runs with none of this installed.
+
+# For semantic memory (BUCKET_EMBED_BACKEND=ollama). Without it, recall falls
+# back to bag-of-words matching and everything else works the same.
+numpy>=1.26
+
+# For the Discord surface (discord_bot.py / run_all.py). Telegram needs nothing.
+discord.py>=2.4
+
+# Only for BUCKET_LLM_BACKEND=anthropic:
+# anthropic>=0.40
