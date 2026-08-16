@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 
 from bucket import Bucket, config
+from bucket.auth import is_admin
 from bucket.lock import InstanceLock
 
 API = "https://api.telegram.org/bot{token}/{method}"
@@ -194,6 +195,12 @@ class BucketBot:
         print(f"bucket is awake as @{self.username}")
         print(f"polish layer: {self.bot.polisher.status()}")
         print(f"chattiness: {config.CHATTINESS}  |  learning: {'on' if config.LEARN else 'off'}")
+        if not config.ADMIN_IDS:
+            print(
+                "telegram: BUCKET_ADMIN_IDS is unset — /forget, /chattiness and "
+                "/wipe are disabled for everyone.",
+                file=sys.stderr,
+            )
         print("ctrl-c to stop\n")
 
         conflicts = 0
@@ -293,7 +300,9 @@ class BucketBot:
         if target and target.lower() != self.username:
             return False
 
-        is_admin = not config.ADMIN_IDS or sender.get("id") in config.ADMIN_IDS
+        # Default deny. An empty allowlist must not hand /wipe to every member
+        # of every chat the bot can see.
+        admin = is_admin(sender.get("id"), config.ADMIN_IDS)
 
         if command in ("start", "help"):
             self.client.send(chat_id, HELP_TEXT)
@@ -310,17 +319,17 @@ class BucketBot:
         elif command == "say":
             self.client.send(chat_id, self.bot.speak(argument, chat=f"tg:{chat_id}"))
         elif command == "forget":
-            if not is_admin:
+            if not admin:
                 self.client.send(chat_id, "no")
                 return True
             self.client.send(chat_id, self.bot.cmd_forget(argument))
         elif command == "chattiness":
-            if not is_admin:
+            if not admin:
                 self.client.send(chat_id, "no")
                 return True
             self.client.send(chat_id, self.bot.cmd_chattiness(argument))
         elif command == "wipe":
-            if not is_admin:
+            if not admin:
                 self.client.send(chat_id, "no")
                 return True
             if argument.strip().lower() != "confirm":

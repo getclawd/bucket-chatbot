@@ -400,8 +400,11 @@ class Brain:
             if row:
                 return row
 
-        # 4. Anything at all.
-        return self.db.random_factoid()
+        # No recall means there is no anchor. Returning an arbitrary fact here
+        # made the tangent and collision strategies look like random noise for
+        # every novel topic. Let the caller fall through to a strategy that can
+        # honestly handle an unseen prompt instead.
+        return None
 
     def _from_tangent(self, text: str) -> Reply | None:
         """State something it knows, then wander off the end of it.

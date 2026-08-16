@@ -2,11 +2,13 @@
 # library. Bucket runs with none of this installed.
 
 # For semantic memory (BUCKET_EMBED_BACKEND=ollama). Without it, recall falls
-# back to bag-of-words matching and everything else works the same.
-numpy>=1.26
+# back to bag-of-words matching and everything else works the same. Keep the
+# Python 3.10/3.11 line on the last NumPy release that supports it; NumPy 2.5
+# requires Python 3.12+.
+numpy==2.5.1; python_version >= "3.12"
+numpy==1.26.4; python_version < "3.12"
 
 # For the Discord surface (discord_bot.py / run_all.py). Telegram needs nothing.
-discord.py>=2.4
+discord.py==2.7.1
 
-# Only for BUCKET_LLM_BACKEND=anthropic:
-# anthropic>=0.40
+# The optional Anthropic client is pinned separately in requirements-optional.txt.

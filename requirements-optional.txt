@@ -1,0 +1,2 @@
+# Install this only when BUCKET_LLM_BACKEND=anthropic is enabled.
+anthropic==0.119.0

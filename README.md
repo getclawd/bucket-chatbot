@@ -12,6 +12,10 @@ outside the memory model.
 
 Runs on Telegram and Discord at the same time, out of one shared memory.
 
+`main` is the public-release line. `experimental-development` is for unreleased
+features and is not a supported release target; merge security fixes there
+before exposing that branch to other contributors.
+
 ---
 
 ## How it works
@@ -107,7 +111,9 @@ one exchange reads as a stuck bot. Measured over 5 runs of `voice_test.py`,
 suppression costs nothing (66% composed with it on vs 65% off) and *narrows* the
 spread, since blocking the easy repeat forces a wider strategy mix.
 
-`voice_test.py` measures both and prints samples:
+`voice_test.py` measures both and prints samples. It separates prompts with no
+corpus recall from replies that ignore a real retrieved anchor, so a fresh seed
+corpus does not fail merely because it has never heard a new name:
 
 ```bash
 python voice_test.py
@@ -232,7 +238,8 @@ way to see why it said something.
 
 ## Setup
 
-Needs Python 3.10+. The engine, both chat clients and the Ollama backends are
+Needs Python 3.10+. Install the pinned runtime dependencies with
+`python -m pip install -r requirements.txt`. The engine, both chat clients and the Ollama backends are
 pure standard library; `numpy` and `discord.py` are only needed for the features
 that use them.
 
@@ -269,6 +276,9 @@ pip install discord.py
    *Read Message History* → open the URL to invite it.
 5. Put your Discord user ID in `BUCKET_DISCORD_ADMIN_IDS` (enable Developer Mode,
    right-click yourself → Copy ID). It's a different namespace from Telegram's.
+
+If you enable the Anthropic polish backend, also run
+`python -m pip install -r requirements-optional.txt`.
 
 ```bash
 python discord_bot.py
@@ -514,6 +524,7 @@ python lexical_test.py        # bm25 vs the idf scan, and index sync
 python repeat_test.py         # it won't say back what was just said
 python blocklist_test.py      # blocked names: learn, reply, display
 python inventory_test.py      # things handed to it, and handed back
+python access_test.py         # admin commands fail closed
 ```
 
 ### Keeping the corpus clean
