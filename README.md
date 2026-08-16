@@ -13,9 +13,7 @@ outside the memory model.
 Runs on Telegram and Discord at the same time, out of one shared memory.
 
 `main` is the public-release line. `experimental-development` is for unreleased
-features and is not a supported release target; merge security fixes there
-before exposing that branch to other contributors.
-
+features and is not a supported release target.
 ---
 
 ## How it works
