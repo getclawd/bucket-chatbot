@@ -20,6 +20,7 @@ except ImportError:  # pragma: no cover
     discord = None
 
 from bucket import Bucket, config
+from bucket.auth import is_admin
 from bucket.lock import InstanceLock
 
 HELP_TEXT = """i am bucket. i learn from everything said near me.
@@ -55,6 +56,12 @@ class BucketDiscordClient(discord.Client if discord else object):
 
     async def on_ready(self) -> None:
         print(f"discord: connected as {self.user} ({self.user.id})")
+        if not config.DISCORD_ADMIN_IDS:
+            print(
+                "discord: BUCKET_DISCORD_ADMIN_IDS is unset — !forget, "
+                "!chattiness and !wipe are disabled for everyone.",
+                file=sys.stderr,
+            )
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -129,9 +136,9 @@ class BucketDiscordClient(discord.Client if discord else object):
         argument = argument.strip()
         chat = f"dc:{message.channel.id}"
 
-        is_admin = (
-            not config.DISCORD_ADMIN_IDS or message.author.id in config.DISCORD_ADMIN_IDS
-        )
+        # Default deny. An empty allowlist must not hand !wipe to every channel
+        # the bot can see.
+        admin = is_admin(message.author.id, config.DISCORD_ADMIN_IDS)
         bot = self.bot
 
         async def run(fn, *args):
@@ -152,11 +159,11 @@ class BucketDiscordClient(discord.Client if discord else object):
         elif command == "say":
             out = await run(bot.speak, argument, chat)
         elif command == "forget":
-            out = await run(bot.cmd_forget, argument) if is_admin else "no"
+            out = await run(bot.cmd_forget, argument) if admin else "no"
         elif command == "chattiness":
-            out = await run(bot.cmd_chattiness, argument) if is_admin else "no"
+            out = await run(bot.cmd_chattiness, argument) if admin else "no"
         elif command == "wipe":
-            if not is_admin:
+            if not admin:
                 out = "no"
             elif argument.lower() != "confirm":
                 out = ("this erases everything bucket has ever learned and cannot be "

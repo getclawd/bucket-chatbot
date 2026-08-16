@@ -32,7 +32,8 @@ python smoke_test.py && python memory_test.py && python shared_memory_test.py &&
 python polish_test.py && python chatter_test.py && python feedback_test.py && \
 python factoid_test.py && python privacy_test.py && \
 python voice_test.py && python recall_test.py && python lexical_test.py && \
-python repeat_test.py && python blocklist_test.py && python inventory_test.py
+python repeat_test.py && python blocklist_test.py && python inventory_test.py && \
+python access_test.py
 ```
 
 `shared_memory_test.py` takes several minutes — it seeds a fresh corpus and
@@ -191,8 +192,10 @@ Strategies split into **composing** (`mashup`, `tangent`, `phrase`,
 carry most of the selection weight deliberately: the target voice is "on-topic
 material recombined into the wrong shape, stated with total confidence," not
 random noise and not verbatim repetition. `voice_test.py` measures the
-composed-vs-single ratio and the parrot/off-topic rates against a fixed prompt
-set — treat a regression there as a real regression, not test flakiness.
+composed-vs-single ratio, parroting, and whether replies retain an anchor from
+the corpus material retrieved for the prompt. A prompt with no lexical/semantic
+recall is reported separately rather than misclassified as noise; treat a
+regression on recallable prompts as real.
 
 `_candidates()` blends lexical (`db.lexical_search`) and semantic (embedding
 cosine similarity) recall, each normalized to 0–1 before merging
