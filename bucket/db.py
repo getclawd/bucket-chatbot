@@ -86,12 +86,14 @@ CREATE INDEX IF NOT EXISTS idx_phrases_count ON phrases(count DESC);
 CREATE TABLE IF NOT EXISTS vectors (
     utterance_id INTEGER PRIMARY KEY,
     dim          INTEGER NOT NULL,
+    model_key    TEXT NOT NULL DEFAULT '',
     vec          BLOB NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS fact_vectors (
     factoid_id INTEGER PRIMARY KEY,
     dim        INTEGER NOT NULL,
+    model_key  TEXT NOT NULL DEFAULT '',
     vec        BLOB NOT NULL
 );
 
@@ -145,6 +147,7 @@ class BucketDB:
         self.conn.executescript(SCHEMA)
         self._migrate_privacy()
         self._migrate_inventory()
+        self._migrate_vectors()
         self.conn.commit()
         self.fts = self._init_fts() if config.FTS else False
 
@@ -261,6 +264,22 @@ class BucketDB:
             self.conn.execute(
                 "ALTER TABLE inventory ADD COLUMN active INTEGER NOT NULL DEFAULT 0"
             )
+
+    def _migrate_vectors(self) -> None:
+        """Track the embedding configuration that produced each vector.
+
+        Vector rows are derived data, so rows from before this column existed
+        deliberately keep the empty default and are backfilled on the next
+        startup with an available embedder.
+        """
+        for table in ("vectors", "fact_vectors"):
+            columns = {
+                row["name"] for row in self.conn.execute(f"PRAGMA table_info({table})")
+            }
+            if "model_key" not in columns:
+                self.conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN model_key TEXT NOT NULL DEFAULT ''"
+                )
 
     def _init_fts(self) -> bool:
         """Create the FTS5 index and backfill it. False if FTS5 isn't available.
@@ -685,64 +704,76 @@ class BucketDB:
     # ------------------------------------------------------------------
     # vectors
     # ------------------------------------------------------------------
-    def add_vector(self, utterance_id: int, dim: int, blob: bytes) -> None:
+    def add_vector(
+        self, utterance_id: int, dim: int, blob: bytes, model_key: str = ""
+    ) -> None:
         self.conn.execute(
-            "INSERT INTO vectors (utterance_id, dim, vec) VALUES (?, ?, ?) "
-            "ON CONFLICT(utterance_id) DO UPDATE SET dim = excluded.dim, vec = excluded.vec",
-            (utterance_id, dim, blob),
+            "INSERT INTO vectors (utterance_id, dim, model_key, vec) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(utterance_id) DO UPDATE SET dim = excluded.dim, "
+            "model_key = excluded.model_key, vec = excluded.vec",
+            (utterance_id, dim, model_key, blob),
         )
         self.conn.commit()
 
-    def all_vectors(self, dim: int) -> list[tuple[int, bytes]]:
+    def all_vectors(self, dim: int, model_key: str = "") -> list[tuple[int, bytes]]:
         return [
             (row["utterance_id"], row["vec"])
             for row in self.conn.execute(
-                "SELECT utterance_id, vec FROM vectors WHERE dim = ?", (dim,)
+                "SELECT utterance_id, vec FROM vectors WHERE dim = ? AND model_key = ?",
+                (dim, model_key),
             )
         ]
 
-    def unvectorized(self, dim: int, limit: int = 500) -> list[sqlite3.Row]:
+    def unvectorized(
+        self, dim: int, limit: int = 500, model_key: str = ""
+    ) -> list[sqlite3.Row]:
         """Utterances with no vector, or one from a different embedding model."""
         return self.conn.execute(
             "SELECT u.id, u.text FROM utterances u "
             "LEFT JOIN vectors v ON v.utterance_id = u.id "
-            "WHERE v.utterance_id IS NULL OR v.dim != ? LIMIT ?",
-            (dim, limit),
+            "WHERE v.utterance_id IS NULL OR v.dim != ? OR v.model_key != ? LIMIT ?",
+            (dim, model_key, limit),
         ).fetchall()
 
-    def count_unvectorized(self, dim: int) -> int:
+    def count_unvectorized(self, dim: int, model_key: str = "") -> int:
         return self.conn.execute(
             "SELECT COUNT(*) AS n FROM utterances u "
             "LEFT JOIN vectors v ON v.utterance_id = u.id "
-            "WHERE v.utterance_id IS NULL OR v.dim != ?",
-            (dim,),
+            "WHERE v.utterance_id IS NULL OR v.dim != ? OR v.model_key != ?",
+            (dim, model_key),
         ).fetchone()["n"]
 
     # Facts get their own index. Without one they're reachable only by
     # substring-matching the subject, so "who is violent" can never find
     # "dario is an abuser" — most of what Bucket knows stays invisible.
-    def add_fact_vector(self, factoid_id: int, dim: int, blob: bytes) -> None:
+    def add_fact_vector(
+        self, factoid_id: int, dim: int, blob: bytes, model_key: str = ""
+    ) -> None:
         self.conn.execute(
-            "INSERT INTO fact_vectors (factoid_id, dim, vec) VALUES (?, ?, ?) "
-            "ON CONFLICT(factoid_id) DO UPDATE SET dim = excluded.dim, vec = excluded.vec",
-            (factoid_id, dim, blob),
+            "INSERT INTO fact_vectors (factoid_id, dim, model_key, vec) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(factoid_id) DO UPDATE SET dim = excluded.dim, "
+            "model_key = excluded.model_key, vec = excluded.vec",
+            (factoid_id, dim, model_key, blob),
         )
         self.conn.commit()
 
-    def all_fact_vectors(self, dim: int) -> list[tuple[int, bytes]]:
+    def all_fact_vectors(self, dim: int, model_key: str = "") -> list[tuple[int, bytes]]:
         return [
             (row["factoid_id"], row["vec"])
             for row in self.conn.execute(
-                "SELECT factoid_id, vec FROM fact_vectors WHERE dim = ?", (dim,)
+                "SELECT factoid_id, vec FROM fact_vectors WHERE dim = ? AND model_key = ?",
+                (dim, model_key),
             )
         ]
 
-    def unvectorized_facts(self, dim: int, limit: int = 200) -> list[sqlite3.Row]:
+    def unvectorized_facts(
+        self, dim: int, limit: int = 200, model_key: str = ""
+    ) -> list[sqlite3.Row]:
         return self.conn.execute(
             "SELECT f.id, f.subject, f.verb, f.object FROM factoids f "
             "LEFT JOIN fact_vectors v ON v.factoid_id = f.id "
-            "WHERE v.factoid_id IS NULL OR v.dim != ? LIMIT ?",
-            (dim, limit),
+            "WHERE v.factoid_id IS NULL OR v.dim != ? OR v.model_key != ? LIMIT ?",
+            (dim, model_key, limit),
         ).fetchall()
 
     def get_factoid(self, factoid_id: int) -> sqlite3.Row | None:
@@ -758,9 +789,10 @@ class BucketDB:
         self.conn.commit()
         return cur.rowcount
 
-    def has_vector(self, utterance_id: int, dim: int) -> bool:
+    def has_vector(self, utterance_id: int, dim: int, model_key: str = "") -> bool:
         return self.conn.execute(
-            "SELECT 1 FROM vectors WHERE utterance_id = ? AND dim = ?", (utterance_id, dim)
+            "SELECT 1 FROM vectors WHERE utterance_id = ? AND dim = ? AND model_key = ?",
+            (utterance_id, dim, model_key),
         ).fetchone() is not None
 
     # ------------------------------------------------------------------

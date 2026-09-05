@@ -58,10 +58,14 @@ class Bucket:
         self.fact_index: VectorIndex | None = None
         if self.embedder.available:
             self.index = VectorIndex(self.embedder.dim)
-            self.index.load(self.db.all_vectors(self.embedder.dim))
+            self.index.load(
+                self.db.all_vectors(self.embedder.dim, self.embedder.fingerprint)
+            )
             self.fact_index = VectorIndex(self.embedder.dim)
             self.db.prune_fact_vectors()
-            self.fact_index.load(self.db.all_fact_vectors(self.embedder.dim))
+            self.fact_index.load(
+                self.db.all_fact_vectors(self.embedder.dim, self.embedder.fingerprint)
+            )
             self.backfill(quiet=quiet)
             self.backfill_facts(quiet=quiet)
 
@@ -137,7 +141,9 @@ class Bucket:
         """Embed any fact learned in the last message or two."""
         if self.fact_index is None:
             return
-        rows = self.db.unvectorized_facts(self.embedder.dim, limit=8)
+        rows = self.db.unvectorized_facts(
+            self.embedder.dim, limit=8, model_key=self.embedder.fingerprint
+        )
         if not rows:
             return
         texts = [f"{r['subject']} {r['verb']} {r['object']}".strip() for r in rows]
@@ -145,17 +151,22 @@ class Bucket:
         if not vectors or len(vectors) != len(rows):
             return
         for row, vector in zip(rows, vectors):
-            self.db.add_fact_vector(row["id"], self.embedder.dim, pack(vector))
+            self.db.add_fact_vector(
+                row["id"], self.embedder.dim, pack(vector), self.embedder.fingerprint
+            )
             self.fact_index.add(row["id"], vector)
 
     def _remember(self, uid: int, text: str) -> None:
         """Give a newly stored utterance a vector, if it doesn't have one."""
-        if self.index is None or self.db.has_vector(uid, self.embedder.dim):
+        if (
+            self.index is None
+            or self.db.has_vector(uid, self.embedder.dim, self.embedder.fingerprint)
+        ):
             return
         vector = self.embedder.embed(text)
         if not vector:
             return
-        self.db.add_vector(uid, self.embedder.dim, pack(vector))
+        self.db.add_vector(uid, self.embedder.dim, pack(vector), self.embedder.fingerprint)
         self.index.add(uid, vector)
 
     def _semantic_facts(self, text: str, limit: int = 6) -> list[tuple[int, float]]:
@@ -173,7 +184,9 @@ class Bucket:
 
         done = 0
         while True:
-            rows = self.db.unvectorized_facts(self.embedder.dim, limit=64)
+            rows = self.db.unvectorized_facts(
+                self.embedder.dim, limit=64, model_key=self.embedder.fingerprint
+            )
             if not rows:
                 break
             texts = [
@@ -183,7 +196,12 @@ class Bucket:
             if not vectors or len(vectors) != len(rows):
                 break
             for row, vector in zip(rows, vectors):
-                self.db.add_fact_vector(row["id"], self.embedder.dim, pack(vector))
+                self.db.add_fact_vector(
+                    row["id"],
+                    self.embedder.dim,
+                    pack(vector),
+                    self.embedder.fingerprint,
+                )
                 self.fact_index.add(row["id"], vector)
             done += len(rows)
 
@@ -196,7 +214,9 @@ class Bucket:
         if self.index is None:
             return 0
 
-        outstanding = self.db.count_unvectorized(self.embedder.dim)
+        outstanding = self.db.count_unvectorized(
+            self.embedder.dim, self.embedder.fingerprint
+        )
         if not outstanding:
             return 0
         if not quiet:
@@ -204,14 +224,21 @@ class Bucket:
 
         done = 0
         while True:
-            rows = self.db.unvectorized(self.embedder.dim, limit=64)
+            rows = self.db.unvectorized(
+                self.embedder.dim, limit=64, model_key=self.embedder.fingerprint
+            )
             if not rows:
                 break
             vectors = self.embedder.embed_batch([row["text"] for row in rows])
             if not vectors or len(vectors) != len(rows):
                 break
             for row, vector in zip(rows, vectors):
-                self.db.add_vector(row["id"], self.embedder.dim, pack(vector))
+                self.db.add_vector(
+                    row["id"],
+                    self.embedder.dim,
+                    pack(vector),
+                    self.embedder.fingerprint,
+                )
                 self.index.add(row["id"], vector)
             done += len(rows)
             if not quiet and outstanding > 200:
