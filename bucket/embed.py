@@ -37,6 +37,7 @@ class Embedder:
         self.available = False
         self.reason = ""
         self.dim = 0
+        self.fingerprint = ""
         self._endpoint = "/api/embed"
 
         if config.EMBED_BACKEND in ("none", "off", ""):
@@ -51,26 +52,33 @@ class Embedder:
     def _probe(self) -> None:
         try:
             with urllib.request.urlopen(f"{config.OLLAMA_URL}/api/tags", timeout=3) as resp:
-                installed = [m.get("name", "") for m in json.load(resp).get("models", [])]
+                installed = json.load(resp).get("models", [])
         except Exception as exc:  # noqa: BLE001
             self.reason = f"ollama unreachable at {config.OLLAMA_URL}: {exc}"
             return
 
         # Ollama reports "nomic-embed-text:latest" for a "nomic-embed-text" pull.
         match = next(
-            (m for m in installed if m == self.model or m.split(":")[0] == self.model.split(":")[0]),
+            (
+                m
+                for m in installed
+                if m.get("name", "") == self.model
+                or m.get("name", "").split(":")[0] == self.model.split(":")[0]
+            ),
             None,
         )
         if not match:
             self.reason = f"model {self.model!r} not pulled (ollama pull {self.model})"
             return
-        self.model = match
+        self.model = match.get("name", self.model)
 
         probe = self.embed("bucket")
         if not probe:
             self.reason = f"{self.model} returned no embedding"
             return
         self.dim = len(probe)
+        digest = match.get("digest", "unknown")
+        self.fingerprint = f"{config.EMBED_BACKEND}:{self.model}:{digest}:v1"
         self.available = True
 
     # ------------------------------------------------------------------
